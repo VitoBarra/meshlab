@@ -519,6 +519,7 @@ RichParameterList ExtraMeshFilterPlugin::initParameterList(const QAction * actio
 		parlst.addParam(RichBool("RefineHole",false,"Refine Filled Hole","After closing the hole it will refine the newly created triangles to make the surface more smooth and the triangulation more evenly spaced"));
 		maxVal = m.cm.bbox.Diag();
 		parlst.addParam(RichPercentage("RefineHoleEdgeLen",maxVal*0.03,0,maxVal,"Hole Refinement Edge Len", "The target edge lenght of the triangulation inside the filled hole."));
+		parlst.addParam(RichBool("RefineEdgeSize",false,"Use average edge len","If selected the edge length of the hole refinement is the average edge length of the boundary of the hole."));
 		break;
 
 	case FP_LOOP_SS:
@@ -1494,6 +1495,7 @@ std::map<std::string, QVariant> ExtraMeshFilterPlugin::applyFilter(
 		bool NewFaceSelectedFlag = par.getBool("NewFaceSelected");
 		bool RefineHoleFlag = par.getBool("RefineHole");
 		float RefineHoleEdgeLen = par.getAbsPerc("RefineHoleEdgeLen");
+		bool RefineEdgeSizeFlag = par.getBool("RefineEdgeSize");
 		int holeCnt;
 		if( SelfIntersectionFlag )
 			holeCnt = tri::Hole<CMeshO>::EarCuttingIntersectionFill<tri::SelfIntersectionEar< CMeshO> >(m.cm,MaxHoleSize,SelectedFlag,cb);
@@ -1530,12 +1532,16 @@ std::map<std::string, QVariant> ExtraMeshFilterPlugin::applyFilter(
 			params.projectFlag  = false;
 			params.surfDistCheck= false;
 			
+			if(RefineEdgeSizeFlag)
+			{
+				// compute the average edge lenght for the closed holes
+				
+			}
 			// Refinement and smoothing can be tricky. Usually it is good to
 			// 1) start with large tris to get fast convergence to the min surf
 			// 2) switch a bit to small tri to unfold bad things at the boundary
 			// 3) go for the desired edge len
-			// Rinse and repeat. 
-			
+			// Rinse and repeat.
 			for(int k=0;k<3;k++)
 			{				
 				params.SetTargetLen(RefineHoleEdgeLen*3.0); params.iter = 5;
