@@ -56,7 +56,8 @@ FilterUnsharp::FilterUnsharp()
 		FP_FACE_NORMAL_NORMALIZE,
 		FP_VERTEX_NORMAL_NORMALIZE,
 		FP_LINEAR_MORPH,
-		FP_SCALAR_HARMONIC_FIELD};
+		FP_HARMONIC_FIELD_SCALAR_TWO_POINTS,
+		FP_HARMONIC_FIELD_SCALAR_SELECTED};
 
 	for (ActionIDType tt : types())
 		actionList.push_back(new QAction(filterName(tt), this));
@@ -95,7 +96,8 @@ QString FilterUnsharp::pythonFilterName(ActionIDType f) const
 	case FP_RECOMPUTE_FACE_NORMAL: return QString("compute_normal_per_face");
 	case FP_RECOMPUTE_QUADFACE_NORMAL: return QString("compute_normal_polygon_mesh_per_face");
 	case FP_LINEAR_MORPH: return QString("compute_coord_linear_morphing");
-	case FP_SCALAR_HARMONIC_FIELD: return QString("compute_scalar_by_scalar_harmonic_field_per_vertex");
+	case FP_HARMONIC_FIELD_SCALAR_TWO_POINTS: return QString("compute_scalar_by_scalar_harmonic_field_two_points_per_vertex");
+	case FP_HARMONIC_FIELD_SCALAR_SELECTED: return QString("compute_scalar_by_scalar_harmonic_field_selected_per_vertex");
 
 	default: assert(0); return QString();
 	}
@@ -125,7 +127,8 @@ QString FilterUnsharp::filterName(ActionIDType filter) const
 	case FP_RECOMPUTE_FACE_NORMAL: return QString("Re-Compute Face Normals");
 	case FP_RECOMPUTE_QUADFACE_NORMAL: return QString("Re-Compute Per-Polygon Face Normals");
 	case FP_LINEAR_MORPH: return QString("Vertex Linear Morphing");
-	case FP_SCALAR_HARMONIC_FIELD: return QString("Generate Scalar Harmonic Field");
+	case FP_HARMONIC_FIELD_SCALAR_TWO_POINTS: return QString("Generate Scalar Harmonic Field between Two Points");
+	case FP_HARMONIC_FIELD_SCALAR_SELECTED: return QString("Generate Scalar Harmonic Field in the selected vertices");
 
 	default: assert(0);
 	}
@@ -279,15 +282,24 @@ QString FilterUnsharp::filterInfo(ActionIDType filterId) const
 			"<b>Three-dimensional metamorphosis: a survey</b><br>by <i>F. Lazarus and A. "
 			"Verroust</i>, Visual Computer, 1998<br>"
 			"<a href='https://doi.org/10.1007/s003710050149'>doi:10.1007/s003710050149</a>");
-	case FP_SCALAR_HARMONIC_FIELD:
+	case FP_HARMONIC_FIELD_SCALAR_TWO_POINTS:
 		return QString(
 			"Generates a scalar harmonic field over the mesh. Input scalar values must be assigned "
 			"to two vertices "
 			"as Dirichlet boundary conditions. Applying the filter, a discrete Laplace operator "
 			"generates the harmonic "
 			"field values for all the mesh vertices, which are stored in the "
-			"<a href='https://stackoverflow.com/questions/58610746'>quality per vertex "
-			"attribute</a> of the mesh.<br>"
+			"quality per vertex attribute of the mesh.<br>"
+			"For more details see:"
+			"<b>Dynamic Harmonic Fields for Surface Processing</b> by <i>Kai Xua, Hao Zhang, "
+			"Daniel Cohen-Or, Yueshan Xionga</i>. "
+			"Computers & Graphics, 2009 <br>"
+			"<a "
+			"href='https://doi.org/10.1016/j.cag.2009.03.022'>doi:10.1016/j.cag.2009.03.022</a>");
+	case FP_HARMONIC_FIELD_SCALAR_SELECTED:
+		return QString(
+			"It interpolate the scalar field over the selected vertices using the scalar values on the unselected ones as"
+			"as Dirichlet boundary conditions.<br>"
 			"For more details see:"
 			"<b>Dynamic Harmonic Fields for Surface Processing</b> by <i>Kai Xua, Hao Zhang, "
 			"Daniel Cohen-Or, Yueshan Xionga</i>. "
@@ -327,7 +339,9 @@ FilterUnsharp::FilterClass FilterUnsharp::getClass(const QAction* a) const
 	case FP_RECOMPUTE_VERTEX_NORMAL:
 	case FP_FACE_NORMAL_NORMALIZE:
 	case FP_VERTEX_NORMAL_NORMALIZE: return FilterPlugin::Normal;
-	case FP_SCALAR_HARMONIC_FIELD: return FilterPlugin::Remeshing;
+	case FP_HARMONIC_FIELD_SCALAR_TWO_POINTS: return FilterPlugin::Quality;
+	case FP_HARMONIC_FIELD_SCALAR_SELECTED: return FilterPlugin::Quality;	
+		
 
 	default: return FilterPlugin::Generic;
 	}
@@ -354,9 +368,9 @@ int FilterUnsharp::getPreConditions(const QAction* a) const
 	case FP_RECOMPUTE_VERTEX_NORMAL:
 	case FP_FACE_NORMAL_NORMALIZE:
 	case FP_CREASE_CUT:
-	case FP_SCALAR_HARMONIC_FIELD: return MeshModel::MM_FACENUMBER;
+	case FP_HARMONIC_FIELD_SCALAR_TWO_POINTS: return MeshModel::MM_FACENUMBER;
+	case FP_HARMONIC_FIELD_SCALAR_SELECTED: return MeshModel::MM_FACENUMBER;
 	case FP_UNSHARP_VERTEX_COLOR: return MeshModel::MM_FACENUMBER | MeshModel::MM_VERTCOLOR;
-
 	case FP_VERTEX_NORMAL_NORMALIZE: return MeshModel::MM_NONE;
 
 	default: assert(0); return MeshModel::MM_NONE;
@@ -388,7 +402,8 @@ int FilterUnsharp::postCondition(const QAction* a) const
 	case FP_RECOMPUTE_VERTEX_NORMAL:
 	case FP_VERTEX_NORMAL_NORMALIZE: return MeshModel::MM_VERTNORMAL;
 	case FP_UNSHARP_VERTEX_COLOR: return MeshModel::MM_VERTCOLOR;
-	case FP_SCALAR_HARMONIC_FIELD: return MeshModel::MM_VERTQUALITY;
+	case FP_HARMONIC_FIELD_SCALAR_TWO_POINTS: return MeshModel::MM_VERTQUALITY;
+	case FP_HARMONIC_FIELD_SCALAR_SELECTED: return MeshModel::MM_VERTQUALITY;
 	default: assert(0); return MeshModel::MM_ALL;
 	}
 }
@@ -418,7 +433,8 @@ int FilterUnsharp::getRequirements(const QAction* action)
 	case FP_UNSHARP_GEOMETRY:
 	case FP_UNSHARP_QUALITY:
 	case FP_VERTEX_QUALITY_SMOOTHING:
-	case FP_SCALAR_HARMONIC_FIELD:
+	case FP_HARMONIC_FIELD_SCALAR_TWO_POINTS:
+	case FP_HARMONIC_FIELD_SCALAR_SELECTED:
 	case FP_UNSHARP_VERTEX_COLOR: return MeshModel::MM_NONE;
 	default: assert(0);
 	}
@@ -701,7 +717,7 @@ RichParameterList FilterUnsharp::initParameterList(const QAction* action, const 
 			   "100 means targe mesh <br>"
 			   "<0 and >100 linearly extrapolate between the two mesh <br>")));
 	} break;
-	case FP_SCALAR_HARMONIC_FIELD:
+	case FP_HARMONIC_FIELD_SCALAR_TWO_POINTS:
 		parlst.addParam(RichPosition(
 			"point1",
 			md.mm()->cm.bbox.min,
@@ -1027,7 +1043,7 @@ std::map<std::string, QVariant> FilterUnsharp::applyFilter(
 
 		m.updateBoxAndNormals();
 	} break;
-	case FP_SCALAR_HARMONIC_FIELD: {
+	case FP_HARMONIC_FIELD_SCALAR_TWO_POINTS: {
 		typedef MESHLAB_SCALAR FieldScalar;
 		md.mm()->updateDataMask(MeshModel::MM_FACEFACETOPO);
 
@@ -1095,6 +1111,11 @@ std::map<std::string, QVariant> FilterUnsharp::applyFilter(
 
 		cb(100, "Done.");
 	} break;
+	case FP_HARMONIC_FIELD_SCALAR_SELECTED: {
+	// This filter extends the quality scalar value over the selected area using the values on the unselected area as constraints
+		
+		cb(100, "Done.");		
+	}		
 	default: wrongActionCalled(filter);
 	}
 	return std::map<std::string, QVariant>();
@@ -1122,7 +1143,7 @@ FilterPlugin::FilterArity FilterUnsharp::filterArity(const QAction* filter) cons
 	case FP_RECOMPUTE_VERTEX_NORMAL:
 	case FP_RECOMPUTE_FACE_NORMAL:
 	case FP_RECOMPUTE_QUADFACE_NORMAL:
-	case FP_SCALAR_HARMONIC_FIELD: return FilterPlugin::SINGLE_MESH;
+	case FP_HARMONIC_FIELD_SCALAR_TWO_POINTS: return FilterPlugin::SINGLE_MESH;
 	case FP_LINEAR_MORPH: return FilterPlugin::FIXED;
 	}
 	return FilterPlugin::NONE;
