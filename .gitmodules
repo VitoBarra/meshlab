@@ -1,4 +1,4 @@
 [submodule "src/vcglib"]
 	path = src/vcglib
-	url = https://github.com/cnr-isti-vclab/vcglib
+	url = git@github.com:VitoBarra/vcglib.git
 	branch = devel
