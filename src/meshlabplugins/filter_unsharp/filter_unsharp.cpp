@@ -403,7 +403,7 @@ int FilterUnsharp::postCondition(const QAction* a) const
 	case FP_VERTEX_NORMAL_NORMALIZE: return MeshModel::MM_VERTNORMAL;
 	case FP_UNSHARP_VERTEX_COLOR: return MeshModel::MM_VERTCOLOR;
 	case FP_HARMONIC_FIELD_SCALAR_TWO_POINTS: return MeshModel::MM_VERTQUALITY;
-	case FP_HARMONIC_FIELD_SCALAR_SELECTED: return MeshModel::MM_VERTQUALITY;
+	case FP_HARMONIC_FIELD_SCALAR_SELECTED: return MeshModel::MM_VERTQUALITY | MeshModel::MM_VERTCOLOR | MeshModel::MM_VERTCOORD |MeshModel::MM_VERTNORMAL |  MeshModel::MM_FACENORMAL;
 	default: assert(0); return MeshModel::MM_ALL;
 	}
 }
@@ -747,6 +747,24 @@ RichParameterList FilterUnsharp::initParameterList(const QAction* action, const 
 			true,
 			"Colorize",
 			"Colorize the mesh to provide an indication of the obtained harmonic field."));
+		break;
+	case FP_HARMONIC_FIELD_SCALAR_SELECTED:
+		parlst.addParam(RichBool(
+			"colorize",
+			true,
+			"Colorize",
+			"Colorize the mesh to provide an indication of the obtained harmonic field."));
+		parlst.addParam(RichEnum(
+			"interpField",
+			0,
+			QStringList() << "Color"
+						  << "Coords"
+						  << "Quality"
+						  << "TextureCord",
+			tr("field to be Interpolation on:"),""));
+
+		parlst.addParam(RichBool("biharmonic",false,"use biharmonic", "use biharmonic"));
+
 		break;
 	}
 	return parlst;
@@ -1112,9 +1130,220 @@ std::map<std::string, QVariant> FilterUnsharp::applyFilter(
 		cb(100, "Done.");
 	} break;
 	case FP_HARMONIC_FIELD_SCALAR_SELECTED: {
-	// This filter extends the quality scalar value over the selected area using the values on the unselected area as constraints
-		
-		cb(100, "Done.");		
+
+		md.mm()->updateDataMask(MeshModel::MM_FACEFACETOPO);
+		CMeshO& m = md.mm()->cm;
+		vcg::tri::Allocator<CMeshO>::CompactEveryVector(m);
+		bool useBiarmonic= par.getBool("biharmonic");
+
+		if (vcg::tri::Clean<CMeshO>::CountConnectedComponents(m) > 1) {
+			throw MLException(
+				"A mesh composed by a single connected component is required by the filter to "
+				"properly work.");
+		}
+		if (vcg::tri::Clean<CMeshO>::CountNonManifoldEdgeFF(m) > 0) {
+			throw MLException(
+				"Mesh has some not 2-manifold faces, this filter requires manifoldness");
+		}
+		if (vcg::tri::Clean<CMeshO>::CountNonManifoldVertexFF(m,false) > 0) {
+			throw MLException(
+				"Mesh has some not 2-manifold vertices, this filter requires manifoldness");
+		}
+
+
+
+
+		//set constraint to all non selected vertex
+		typedef MESHLAB_SCALAR FieldScalar;
+
+
+
+
+
+		switch(par.getEnum("interpField"))
+		{
+
+		case 0: // Color
+		{
+			CMeshO::PerVertexAttributeHandle<FieldScalar> Rfield = tri::Allocator<CMeshO>::GetPerVertexAttribute<FieldScalar>(m, "Rfield");
+			CMeshO::PerVertexAttributeHandle<FieldScalar> Gfield = tri::Allocator<CMeshO>::GetPerVertexAttribute<FieldScalar>(m, "Gfield");
+			CMeshO::PerVertexAttributeHandle<FieldScalar> Bfield = tri::Allocator<CMeshO>::GetPerVertexAttribute<FieldScalar>(m, "Bfield");
+
+			tri::Harmonic<CMeshO, FieldScalar>::ConstraintVec Rconstraints;
+			tri::Harmonic<CMeshO, FieldScalar>::ConstraintVec Gconstraints;
+			tri::Harmonic<CMeshO, FieldScalar>::ConstraintVec Bconstraints;
+
+			// Set up color constraints
+			for(auto & v : m.vert)
+			{
+				if(v.IsS()) continue;
+				log("Color saved : %uc %uc %uc",v.C()[0],v.C()[1],v.C()[2]);
+				Rconstraints.push_back(tri::Harmonic<CMeshO, FieldScalar>::Constraint(&v, static_cast<float>(v.C()[0])/256.0));
+				Gconstraints.push_back(tri::Harmonic<CMeshO, FieldScalar>::Constraint(&v, static_cast<float>(v.C()[1])/256.0));
+				Bconstraints.push_back(tri::Harmonic<CMeshO, FieldScalar>::Constraint(&v, static_cast<float>(v.C()[2])/256.0));
+			}
+
+			bool noErrorOccurs = true;
+			//Compute the scalar field with the specified constraints
+			noErrorOccurs = tri::Harmonic<CMeshO, FieldScalar>::ComputeScalarField(m, Rconstraints, Rfield,useBiarmonic);
+
+			if (!noErrorOccurs) {
+				throw MLException("failed Harmonic computer scalar field for selected vertex");
+			}
+			noErrorOccurs = tri::Harmonic<CMeshO, FieldScalar>::ComputeScalarField(m, Gconstraints, Gfield,useBiarmonic);
+
+			if (!noErrorOccurs) {
+				throw MLException("failed Harmonic computer scalar field for selected vertex");
+			}
+			noErrorOccurs = tri::Harmonic<CMeshO, FieldScalar>::ComputeScalarField(m, Bconstraints, Bfield,useBiarmonic);
+
+			if (!noErrorOccurs) {
+				throw MLException("failed Harmonic computer scalar field for selected vertex");
+			}
+
+			// change color value for each selected vertex
+			for(auto & v : m.vert) {
+				log("pre : %uc %uc %uc",v.C()[0],v.C()[1],v.C()[2]);
+				v.C()[0] = static_cast<unsigned char>(Rfield[v]*256.0);
+				v.C()[1] = static_cast<unsigned char>(Gfield[v]*256.0);
+				v.C()[2] = static_cast<unsigned char>(Bfield[v]*256.0);
+				log("post : %uc %uc %uc",v.C()[0],v.C()[1],v.C()[2]);
+			}
+		}
+		case 1: //Coords
+		{
+			CMeshO::PerVertexAttributeHandle<FieldScalar> Xfield = tri::Allocator<CMeshO>::GetPerVertexAttribute<FieldScalar>(m, "Xfield");
+			CMeshO::PerVertexAttributeHandle<FieldScalar> Yfield = tri::Allocator<CMeshO>::GetPerVertexAttribute<FieldScalar>(m, "Yfield");
+			CMeshO::PerVertexAttributeHandle<FieldScalar> Zfield = tri::Allocator<CMeshO>::GetPerVertexAttribute<FieldScalar>(m, "Zfield");
+
+			tri::Harmonic<CMeshO, FieldScalar>::ConstraintVec Xconstraints;
+			tri::Harmonic<CMeshO, FieldScalar>::ConstraintVec Yconstraints;
+			tri::Harmonic<CMeshO, FieldScalar>::ConstraintVec Zconstraints;
+
+			// Set up color constraints
+			for(auto & v : m.vert)
+			{
+				if(v.IsS()) continue;
+				Xconstraints.push_back(tri::Harmonic<CMeshO, FieldScalar>::Constraint(&v, v.P().X()));
+				Yconstraints.push_back(tri::Harmonic<CMeshO, FieldScalar>::Constraint(&v, v.P().Y()));
+				Zconstraints.push_back(tri::Harmonic<CMeshO, FieldScalar>::Constraint(&v, v.P().Z()));
+			}
+
+			bool NoErrorOccurs = true;
+			//Compute the scalar field with the specified constraints
+			NoErrorOccurs = tri::Harmonic<CMeshO, FieldScalar>::ComputeScalarField(m, Xconstraints, Xfield);
+
+			if (!NoErrorOccurs) {
+				throw MLException("failed Harmonic computer scalar field for selected vertex");
+			}
+			NoErrorOccurs = tri::Harmonic<CMeshO, FieldScalar>::ComputeScalarField(m, Yconstraints, Yfield);
+
+			if (!NoErrorOccurs) {
+				throw MLException("failed Harmonic computer scalar field for selected vertex");
+			}
+			NoErrorOccurs = tri::Harmonic<CMeshO, FieldScalar>::ComputeScalarField(m, Zconstraints, Zfield);
+
+			if (!NoErrorOccurs) {
+				throw MLException("failed Harmonic computer scalar field for selected vertex");
+			}
+
+			// change color value for each selected vertex
+			for(auto & v : m.vert) {
+
+				v.P().X() = Xfield[v];
+				v.P().Y() = Yfield[v];
+				v.P().Z() = Zfield[v];
+			}
+
+			md.mm()->updateBoxAndNormals();
+			break;
+		}
+		case 2: // Quality
+		{
+			if(vcg::tri::HasPerVertexQuality(m))
+			{
+				throw MLException("mesh must have per vertex quality");
+			}
+			CMeshO::PerVertexAttributeHandle<FieldScalar> handle = tri::Allocator<CMeshO>::GetPerVertexAttribute<FieldScalar>(m, "harmonic");
+			tri::Harmonic<CMeshO, FieldScalar>::ConstraintVec constraints;
+
+			// Set up quality constraints
+			for(auto & v : m.vert)
+			{
+				if(v.IsS()) continue;
+				constraints.push_back(tri::Harmonic<CMeshO, FieldScalar>::Constraint(&v, v.Q()));
+			}
+
+			//Compute the scalar field with the specified constant
+			bool noErrorOccurs =tri::Harmonic<CMeshO, FieldScalar>::ComputeScalarField(m, constraints, handle,useBiarmonic);
+
+			if (!noErrorOccurs) {
+				throw MLException(" failed Harmonic computer scalar field for selected vertex");
+			}
+
+			// change quality value for each selected vertex
+			for(auto & v : m.vert)
+				v.Q() = handle[v];
+
+			if (par.getBool("colorize")) {
+				md.mm()->updateDataMask(MeshModel::MM_VERTCOLOR);
+				vcg::tri::UpdateColor<CMeshO>::PerVertexQualityRamp(m);
+			}
+
+			break;
+		}
+		case 3: // TextCord
+		{
+
+			if(!vcg::tri::HasPerVertexTexCoord(m))
+				throw MLException("mesh does not have texCoort in vertex");
+
+			CMeshO::PerVertexAttributeHandle<FieldScalar> Uhandle = tri::Allocator<CMeshO>::GetPerVertexAttribute<FieldScalar>(m, "UCord");
+			CMeshO::PerVertexAttributeHandle<FieldScalar> Vhandle = tri::Allocator<CMeshO>::GetPerVertexAttribute<FieldScalar>(m, "VCord");
+			tri::Harmonic<CMeshO, FieldScalar>::ConstraintVec Uconstraints;
+			tri::Harmonic<CMeshO, FieldScalar>::ConstraintVec Vconstraints;
+
+			// Set up tex Cord constraints
+			for(auto & v : m.vert)
+			{
+				if(v.IsS()) continue;
+				Uconstraints.push_back(tri::Harmonic<CMeshO, FieldScalar>::Constraint(&v, v.T().U()));
+				Vconstraints.push_back(tri::Harmonic<CMeshO, FieldScalar>::Constraint(&v, v.T().V()));
+			}
+
+			//Compute the scalar field with the specified constant
+			bool noErrorOccurs =tri::Harmonic<CMeshO, FieldScalar>::ComputeScalarField(m, Uconstraints, Uhandle,useBiarmonic);
+
+			if (!noErrorOccurs)
+				throw MLException(" failed to compute harmonic scalar U field for selected vertex");
+
+
+			noErrorOccurs =tri::Harmonic<CMeshO, FieldScalar>::ComputeScalarField(m, Vconstraints, Vhandle,useBiarmonic);
+
+			if (!noErrorOccurs)
+				throw MLException(" failed to compute harmonic scalar V field for selected vertex");
+
+
+			// set new tex cord for each selected vertex
+			for(auto & v : m.vert)
+			{
+				v.T().U() = Uhandle[v];
+				v.T().V() = Vhandle[v];
+			}
+
+
+
+			break;
+		}
+
+
+		}
+
+
+
+
+		cb(100, "Done.");
+		break;
 	}		
 	default: wrongActionCalled(filter);
 	}
